@@ -23,36 +23,6 @@ impl Display for Erroneous {
 
 impl Error for Erroneous {}
 
-// TODO - this idea is questionable
-// macro_rules! impl_wrapped_for {
-//     ($for:ident, $inner:ident, $error:ident, $for_str:expr) => {
-//         impl Wrapped for $for {
-//             type Inner = $inner;
-//             type Error = $error;
-//
-//             fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
-//             where
-//                 Self: Sized,
-//             {
-//                 let inner = inner.into();
-//                 if inner == 5 {
-//                     Err(Erroneous {})
-//                 } else {
-//                     Ok(Self { inner })
-//                 }
-//             }
-//
-//             fn inner(&self) -> &Self::Inner {
-//                 &self.inner
-//             }
-//
-//             fn unwrap(self) -> Self::Inner {
-//                 self.inner
-//             }
-//         }
-//     };
-// }
-
 macro_rules! impl_refs_for {
     ($for:ident, $for_str:expr) => {
         impl TryFrom<<$for as Wrapped>::Inner> for $for {
