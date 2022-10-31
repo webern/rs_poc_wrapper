@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 
-pub trait Wrapped {
+pub trait Wrapper {
     type Inner: PartialEq;
     type Error: Display;
     fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
@@ -25,17 +25,17 @@ impl Error for Erroneous {}
 
 macro_rules! impl_refs_for {
     ($for:ident, $for_str:expr) => {
-        impl TryFrom<<$for as Wrapped>::Inner> for $for {
-            type Error = <$for as Wrapped>::Error;
+        impl TryFrom<<$for as Wrapper>::Inner> for $for {
+            type Error = <$for as Wrapper>::Error;
 
-            fn try_from(input: <$for as Wrapped>::Inner) -> Result<Self, Self::Error> {
+            fn try_from(input: <$for as Wrapper>::Inner) -> Result<Self, Self::Error> {
                 Self::new(input)
             }
         }
 
-        impl From<$for> for <$for as Wrapped>::Inner {
-            fn from(wrapped: $for) -> Self {
-                wrapped.unwrap()
+        impl From<$for> for <$for as Wrapper>::Inner {
+            fn from(wrapper: $for) -> Self {
+                wrapper.unwrap()
             }
         }
 
@@ -44,13 +44,13 @@ macro_rules! impl_refs_for {
             where
                 D: serde::de::Deserializer<'de>,
             {
-                let original = <$for as Wrapped>::Inner::deserialize(deserializer)?;
+                let original = <$for as Wrapper>::Inner::deserialize(deserializer)?;
                 // this is dumb
                 use serde::de::Error;
-                let wrapped = $for::new(original).map_err(|e| {
+                let wrapper = $for::new(original).map_err(|e| {
                     D::Error::custom(format!("Unable to deserialize into {}: {}", $for_str, e))
                 })?;
-                Ok(wrapped)
+                Ok(wrapper)
             }
         }
 
@@ -66,20 +66,20 @@ macro_rules! impl_refs_for {
         }
 
         impl std::ops::Deref for $for {
-            type Target = <$for as Wrapped>::Inner;
+            type Target = <$for as Wrapper>::Inner;
             fn deref(&self) -> &Self::Target {
                 self.inner()
             }
         }
 
-        impl core::borrow::Borrow<<$for as Wrapped>::Inner> for $for {
-            fn borrow(&self) -> &<$for as Wrapped>::Inner {
+        impl core::borrow::Borrow<<$for as Wrapper>::Inner> for $for {
+            fn borrow(&self) -> &<$for as Wrapper>::Inner {
                 self.inner()
             }
         }
 
-        impl AsRef<<$for as Wrapped>::Inner> for $for {
-            fn as_ref(&self) -> &<$for as Wrapped>::Inner {
+        impl AsRef<<$for as Wrapper>::Inner> for $for {
+            fn as_ref(&self) -> &<$for as Wrapper>::Inner {
                 self.inner()
             }
         }
@@ -90,44 +90,69 @@ macro_rules! impl_refs_for {
             }
         }
 
-        impl PartialEq<<$for as Wrapped>::Inner> for $for {
-            fn eq(&self, other: &<$for as Wrapped>::Inner) -> bool {
+        impl PartialEq<<$for as Wrapper>::Inner> for $for {
+            fn eq(&self, other: &<$for as Wrapper>::Inner) -> bool {
                 self.inner().eq(other)
             }
         }
 
-        impl PartialEq<$for> for <$for as Wrapped>::Inner {
+        impl PartialEq<$for> for <$for as Wrapper>::Inner {
             fn eq(&self, other: &$for) -> bool {
                 self.eq(other.inner())
             }
         }
 
-        impl PartialEq<&<$for as Wrapped>::Inner> for $for {
-            fn eq(&self, other: &&<$for as Wrapped>::Inner) -> bool {
+        impl PartialEq<&<$for as Wrapper>::Inner> for $for {
+            fn eq(&self, other: &&<$for as Wrapper>::Inner) -> bool {
                 self.inner().eq(*other)
             }
         }
 
-        impl PartialEq<&$for> for <$for as Wrapped>::Inner {
+        impl PartialEq<&$for> for <$for as Wrapper>::Inner {
             fn eq(&self, other: &&$for) -> bool {
                 self.eq(other.inner())
             }
         }
 
-        impl PartialEq<<$for as Wrapped>::Inner> for &$for {
-            fn eq(&self, other: &<$for as Wrapped>::Inner) -> bool {
+        impl PartialEq<<$for as Wrapper>::Inner> for &$for {
+            fn eq(&self, other: &<$for as Wrapper>::Inner) -> bool {
                 self.inner().eq(other)
             }
         }
 
-        impl PartialEq<$for> for &<$for as Wrapped>::Inner {
+        impl PartialEq<$for> for &<$for as Wrapper>::Inner {
             fn eq(&self, other: &$for) -> bool {
                 (*self).eq(other.inner())
             }
         }
+
+        impl PartialEq<$for> for $for {
+            fn eq(&self, other: &$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
+
+        impl PartialEq<&$for> for $for {
+            fn eq(&self, other: &&$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
+
+        impl PartialEq<$for> for &$for {
+            fn eq(&self, other: &$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
+
+        // impl PartialEq<&$for> for &$for {
+        //     fn eq(&self, other: &$for) -> bool {
+        //         self.inner().eq(other.inner())
+        //     }
+        // }
     };
 }
 
+// TODO - note this is problematic because the compiler can't differentiate `&String` from `&str`
 // These assume that the "inner" type implements AsRef<str>, et. al. (i.e. when it is a `String`)
 macro_rules! impl_as_ref_str_for {
     ($for:ident) => {
@@ -145,12 +170,12 @@ macro_rules! impl_as_ref_str_for {
     };
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Int {
     inner: u64,
 }
 
-impl Wrapped for Int {
+impl Wrapper for Int {
     type Inner = u64;
     type Error = Erroneous;
 
@@ -177,12 +202,12 @@ impl Wrapped for Int {
 
 impl_refs_for!(Int, "Int");
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Str {
     inner: String,
 }
 
-impl Wrapped for Str {
+impl Wrapper for Str {
     type Inner = String;
     type Error = Erroneous;
 
@@ -227,12 +252,12 @@ impl Display for Enumious {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct EnumSetting {
     inner: Enumious,
 }
 
-impl Wrapped for EnumSetting {
+impl Wrapper for EnumSetting {
     type Inner = Enumious;
     type Error = Erroneous;
 
