@@ -23,7 +23,37 @@ impl Display for Erroneous {
 
 impl Error for Erroneous {}
 
-macro_rules! impl_wrapped_for {
+// TODO - this idea is questionable
+// macro_rules! impl_wrapped_for {
+//     ($for:ident, $inner:ident, $error:ident, $for_str:expr) => {
+//         impl Wrapped for $for {
+//             type Inner = $inner;
+//             type Error = $error;
+//
+//             fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+//             where
+//                 Self: Sized,
+//             {
+//                 let inner = inner.into();
+//                 if inner == 5 {
+//                     Err(Erroneous {})
+//                 } else {
+//                     Ok(Self { inner })
+//                 }
+//             }
+//
+//             fn inner(&self) -> &Self::Inner {
+//                 &self.inner
+//             }
+//
+//             fn unwrap(self) -> Self::Inner {
+//                 self.inner
+//             }
+//         }
+//     };
+// }
+
+macro_rules! impl_refs_for {
     ($for:ident, $for_str:expr) => {
         impl TryFrom<<$for as Wrapped>::Inner> for $for {
             type Error = <$for as Wrapped>::Error;
@@ -32,12 +62,6 @@ macro_rules! impl_wrapped_for {
                 Self::new(input)
             }
         }
-
-        // impl From<$for> for <$for as Wrapped>::Inner {
-        //     fn from(wrapped: &for) -> <$for as Wrapped>::Inner {
-        //         wrapped.unwrap()
-        //     }
-        // }
 
         impl From<$for> for <$for as Wrapped>::Inner {
             fn from(wrapped: $for) -> Self {
@@ -134,6 +158,23 @@ macro_rules! impl_wrapped_for {
     };
 }
 
+// These assume that the "inner" type implements AsRef<str>, et. al. (i.e. when it is a `String`)
+macro_rules! impl_as_ref_str_for {
+    ($for:ident) => {
+        impl AsRef<str> for $for {
+            fn as_ref(&self) -> &str {
+                self.inner().as_ref()
+            }
+        }
+
+        impl core::borrow::Borrow<str> for $for {
+            fn borrow(&self) -> &str {
+                self.inner().as_ref()
+            }
+        }
+    };
+}
+
 #[derive(Debug, PartialEq)]
 struct Int {
     inner: u64,
@@ -164,7 +205,7 @@ impl Wrapped for Int {
     }
 }
 
-impl_wrapped_for!(Int, "Int");
+impl_refs_for!(Int, "Int");
 
 #[derive(Debug, PartialEq)]
 struct Str {
@@ -196,13 +237,8 @@ impl Wrapped for Str {
     }
 }
 
-impl_wrapped_for!(Str, "Str");
-
-impl AsRef<str> for Str {
-    fn as_ref(&self) -> &str {
-        self.inner().as_ref()
-    }
-}
+impl_refs_for!(Str, "Str");
+impl_as_ref_str_for!(Str);
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -250,7 +286,7 @@ impl Wrapped for EnumSetting {
     }
 }
 
-impl_wrapped_for!(EnumSetting, "EnumSetting");
+impl_refs_for!(EnumSetting, "EnumSetting");
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 struct Settings {
