@@ -1,34 +1,29 @@
 use darling::{FromAttributes, FromMeta};
 use proc_macro::{Ident, TokenStream};
-use quote::ToTokens;
+use quote::{format_ident, ToTokens};
+use quote::{quote, TokenStreamExt};
 use std::io::Write;
 use syn::Lit::Str;
+use syn::__private::TokenStream2;
 use syn::{
     parse_macro_input, parse_quote, Attribute, AttributeArgs, Data, DataStruct, DeriveInput, Field,
     Fields, ItemStruct, Type, Visibility,
 };
 
-// #[cfg(debug_assertions)]
-// fn debug<S: AsRef<str>>(s: S) {
-//     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("log.debug");
-//     let mut f = std::fs::OpenOptions::new().write(true).open(&p).expect(&format!("unable to open '{}'", p.display()));
-//     f.write_all(s.as_ref().as_bytes()).expect(&format!("unable to write to '{}'", p.display()));
-// }
-
 #[proc_macro_derive(Wrapper, attributes(wrapper))]
 pub fn wrapper(input: TokenStream) -> TokenStream {
     // Parse the input tokens
-    // let input_cloned = input;
     let derive_input = parse_macro_input!(input as DeriveInput);
     let settings = RawSettings::from_attributes(derive_input.attrs.as_slice())
         .expect("Unable to parse `wrapper` macro arguments");
-    // let attr_args = parse_macro_input!(input as AttributeArgs);
 
-    let info = StructInfo::new(&derive_input, settings);
+    // Further parse the input
+    let struct_info = StructInfo::new(&derive_input, settings);
 
-    panic!("{:?}", info);
-
-    // panic!("{:?}\n\n{:?}", derive_input, "attr_args")
+    // Write impls
+    let mut ast2 = TokenStream2::new();
+    struct_info.write_impls(&mut ast2);
+    ast2.into_token_stream().into()
 }
 
 /// Store any args given by the user inside `#[wrapper(as_ref_str=false, ...)]`.
@@ -42,47 +37,73 @@ struct RawSettings {
 
 #[derive(Debug, Clone)]
 struct StructInfo {
-    settings: RawSettings,
-    ident: Ident,
+    raw_settings: RawSettings,
+    wrapper: String,
+    inner_field_name: String,
+    inner: String,
+    as_ref_str: bool,
 }
 
 impl StructInfo {
     fn new(derive_input: &DeriveInput, settings: RawSettings) -> Self {
-        let struct_ident = derive_input.ident.clone();
+        let wrapper = derive_input.ident.to_string();
+
+        // let struct_typename = struct_ident.
         let (inner_field, inner_field_name) = match derive_input.data.clone() {
             Data::Struct(s) => find_inner_field(s, settings.inner.as_ref().map(|s| s.as_str())),
             Data::Enum(_) => panic!("A Wrapper cannot be an enum, it must be a struct"),
             Data::Union(_) => panic!("A Wrapper cannot be an union, it must be a struct"),
         };
-        let fucking_ident: syn::Ident = inner_field.ident.unwrap();
-        let fucking_ty = inner_field.ty;
+        let inner_type = &inner_field.ty;
         let mut stream = proc_macro2::TokenStream::new();
-        fucking_ty.to_tokens(&mut stream);
-        let s = stream.to_string();
-        let as_ref_str = settings.as_ref_str.unwrap_or(s == "String");
-        panic!("{}", s);
+        inner_type.to_tokens(&mut stream);
+        let inner = stream.to_string();
+        // Automatically imple AsRef<str> when unspecified by the user but the inner type is String.
+        // Note, this might not work if String is not what we think it is.
+        let as_ref_str = settings.as_ref_str.unwrap_or(inner == "String");
 
-        // let dlkfdfklgj = match fucking_ty {
-        //     Type::Array(_) => {}
-        //     Type::BareFn(_) => {}
-        //     Type::Group(_) => {}
-        //     Type::ImplTrait(_) => {}
-        //     Type::Infer(_) => {}
-        //     Type::Macro(_) => {}
-        //     Type::Never(_) => {}
-        //     Type::Paren(_) => {}
-        //     Type::Path(x) => {panic!("{:?}", x)}
-        //     Type::Ptr(_) => {}
-        //     Type::Reference(_) => {}
-        //     Type::Slice(_) => {}
-        //     Type::TraitObject(_) => {}
-        //     Type::Tuple(_) => {}
-        //     Type::Verbatim(_) => {}
-        //     _ => {}
-        // };
+        Self {
+            raw_settings: settings,
+            wrapper,
+            inner_field_name,
+            inner,
+            as_ref_str,
+        }
+    }
 
-        // panic!("{}", );
-        todo!("xyz")
+    fn write_impls(&self, stream: &mut TokenStream2) {
+        let wrapper = format_ident!("{}", &self.wrapper);
+        let inner = format_ident!("{}", &self.inner);
+        let inner_field_name = format_ident!("{}", &self.inner_field_name);
+        let inner_ref_type = format_ident!(
+            "{}",
+            if self.as_ref_str {
+                String::from("str")
+            } else {
+                format!("&{}", inner)
+            }
+        );
+        let code = quote!(
+            impl wrapper::Wrapper for #wrapper {
+                type Inner = #inner;
+                type Error = wrapper::Erroneous;
+
+                fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+                where
+                    Self: Sized,
+                {
+                    let inner = inner.into();
+                    // TODO - use a Validate::validate trait
+                    Ok(Self{ #inner_field_name: inner })
+                }
+
+                fn inner(&self) -> &Self::Inner { &self.#inner_field_name }
+
+                fn unwrap(self) -> Self::Inner { self.#inner_field_name }
+            }
+        );
+        // panic!("{}", code);
+        stream.append_all(code.into_iter());
     }
 }
 

@@ -13,7 +13,7 @@ pub trait Wrapper {
 }
 
 #[derive(Debug, Default)]
-struct Erroneous {}
+pub struct Erroneous {}
 
 impl Display for Erroneous {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
