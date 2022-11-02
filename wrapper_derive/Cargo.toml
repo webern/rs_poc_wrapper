@@ -14,6 +14,7 @@ proc-macro = true
 darling = "0.14"
 proc-macro2 = "1"
 quote = "1"
+serde = "1" # bring this into scope because the generated code expects it
 syn = { version = "1", default-features = false, features = ["full", "parsing", "printing", "proc-macro", "visit-mut"] }
 
 [dev-dependencies]

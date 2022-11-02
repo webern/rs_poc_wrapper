@@ -148,6 +148,7 @@ dependencies = [
  "darling",
  "proc-macro2",
  "quote",
+ "serde",
  "syn",
  "wrapper",
 ]

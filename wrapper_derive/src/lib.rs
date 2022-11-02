@@ -80,30 +80,157 @@ impl StructInfo {
             if self.as_ref_str {
                 String::from("str")
             } else {
-                format!("&{}", inner)
+                format!("{}", inner)
             }
         );
-        let code = quote!(
+        let impls = quote!(
             impl wrapper::Wrapper for #wrapper {
                 type Inner = #inner;
-                type Error = wrapper::Erroneous;
 
-                fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+                fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, wrapper::ValidationError>
                 where
                     Self: Sized,
                 {
-                    let inner = inner.into();
-                    // TODO - use a Validate::validate trait
-                    Ok(Self{ #inner_field_name: inner })
+                    Ok(<#wrapper as wrapper::Validate>::validate(inner.into())?)
                 }
 
                 fn inner(&self) -> &Self::Inner { &self.#inner_field_name }
 
                 fn unwrap(self) -> Self::Inner { self.#inner_field_name }
             }
+
+            impl TryFrom<<#wrapper as Wrapper>::Inner> for #wrapper {
+                type Error = ValidationError;
+                fn try_from(input: <#wrapper as Wrapper>::Inner) -> Result<Self, ValidationError> {
+                    Self::new(input)
+                }
+            }
+
+            impl<'de> serde::de::Deserialize<'de> for #wrapper {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::de::Deserializer<'de>,
+                {
+                    let original = <#wrapper as Wrapper>::Inner::deserialize(deserializer)?;
+                    // We need to make sure the serde Error trait is in scope.
+                    use serde::de::Error as _;
+                    let wrapper = #wrapper::new(original).map_err(|e| {
+                        D::Error::custom(format!("Unable to deserialize into {}: {}", stringify!(#wrapper), e))
+                    })?;
+                    Ok(wrapper)
+                }
+            }
+
+            impl serde::ser::Serialize for #wrapper {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::ser::Serializer,
+                {
+                    self.inner().serialize(serializer)
+                }
+            }
+
+            impl std::fmt::Display for #wrapper {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self.inner())
+                }
+            }
+
+            impl std::ops::Deref for #wrapper {
+                type Target = #inner_ref_type;
+                fn deref(&self) -> &Self::Target {
+                    self.inner()
+                }
+            }
+
+            impl core::borrow::Borrow<#inner_ref_type> for #wrapper {
+                fn borrow(&self) -> &#inner_ref_type {
+                    self.inner()
+                }
+            }
+
+            impl AsRef<#inner_ref_type> for #wrapper {
+                fn as_ref(&self) -> &#inner_ref_type {
+                    self.inner()
+                }
+            }
+
+            // The Wrapper type can be compared with the Inner type
+            impl PartialEq<<#wrapper as Wrapper>::Inner> for #wrapper {
+                fn eq(&self, other: &<#wrapper as Wrapper>::Inner) -> bool {
+                    self.inner().eq(other)
+                }
+            }
+
+            // The Inner type can be compared with the Wrapper type
+            impl PartialEq<#wrapper> for <#wrapper as Wrapper>::Inner {
+                fn eq(&self, other: &#wrapper) -> bool {
+                    self.eq(other.inner())
+                }
+            }
+
+            impl PartialEq<&#inner_ref_type> for #wrapper {
+                fn eq(&self, other: &&#inner_ref_type) -> bool {
+                    self.inner().eq(*other)
+                }
+            }
+
+            impl PartialEq<&#wrapper> for <#wrapper as Wrapper>::Inner {
+                fn eq(&self, other: &&#wrapper) -> bool {
+                    self.eq(other.inner())
+                }
+            }
+
+            impl PartialEq<<#wrapper as Wrapper>::Inner> for &#wrapper {
+                fn eq(&self, other: &<#wrapper as Wrapper>::Inner) -> bool {
+                    self.inner().eq(other)
+                }
+            }
+
+            impl PartialEq<#wrapper> for &#inner_ref_type {
+                fn eq(&self, other: &#wrapper) -> bool {
+                    (*self).eq(other.inner())
+                }
+            }
         );
-        // panic!("{}", code);
-        stream.append_all(code.into_iter());
+
+        stream.append_all(impls.into_iter());
+
+        // if self.as_ref_str {
+        //     self.impl_as_ref_str(stream);
+        // } else {
+        //     self.impl_as_ref_inner(stream);
+        // }
+
+        if self.as_ref_str {
+            let code = quote!(
+                impl TryFrom<&#inner_ref_type> for #wrapper {
+                    type Error = ValidationError;
+                    fn try_from(input: &#inner_ref_type) -> Result<Self, ValidationError> {
+                        Self::new(input)
+                    }
+                }
+            );
+            stream.append_all(code.into_iter());
+        }
+    }
+
+    // impl From<$for> for <$for as Wrapper>::Inner {
+    // impl std::ops::Deref for $for {
+    // impl core::borrow::Borrow<<$for as Wrapper>::Inner> for $for {
+    // impl AsRef<<$for as Wrapper>::Inner> for $for {
+    // impl PartialEq<&<$for as Wrapper>::Inner> for $for {
+    // impl PartialEq<&$for> for <$for as Wrapper>::Inner {
+    // impl PartialEq<<$for as Wrapper>::Inner> for &$for {
+    // impl PartialEq<$for> for &<$for as Wrapper>::Inner {
+    // impl PartialEq<&$for> for $for {
+    // impl PartialEq<$for> for &$for {
+    fn impl_as_ref_str(&self, stream: &mut TokenStream2) {
+        // todo!()
+    }
+
+    fn impl_as_ref_inner(&self, stream: &mut TokenStream2) {
+        // todo!()
     }
 }
 
