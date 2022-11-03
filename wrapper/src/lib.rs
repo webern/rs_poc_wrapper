@@ -4,31 +4,75 @@ use std::fmt::{Debug, Display, Formatter};
 
 pub trait Wrapper {
     type Inner: PartialEq;
-    type Error: Display;
-    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, ValidationError>
     where
         Self: Sized;
     fn inner(&self) -> &Self::Inner;
     fn unwrap(self) -> Self::Inner;
 }
 
-#[derive(Debug, Default)]
-struct Erroneous {}
+/// The error type that [`Validate::validate`] returns.
+#[derive(Debug)]
+pub struct ValidationError {
+    /// A message about what occurred during validation.
+    message: String,
+    /// The underlying error that occurred (if any).
+    source: Option<Box<dyn Error + Send + Sync>>,
+}
 
-impl Display for Erroneous {
+impl Display for ValidationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "erroneous")
+        if let Some(e) = self.source.as_ref() {
+            write!(f, "{}: {}", self.message, e)
+        } else {
+            write!(f, "{}", self.message)
+        }
     }
 }
 
-impl Error for Erroneous {}
+impl Error for ValidationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source.as_ref().map(|e| e.as_ref() as &(dyn Error))
+    }
+}
+
+impl ValidationError {
+    /// Creates a new [`ValidationError`]. Use this when there is no underlying error to include.
+    pub fn new<S>(message: S) -> Self
+    where
+        S: AsRef<str>,
+    {
+        Self {
+            message: message.as_ref().into(),
+            source: None,
+        }
+    }
+
+    /// Creates a new [`ValidationError`]. Use this to preserve an underlying error.
+    pub fn new_with_cause<S, E>(message: S, source: E) -> Self
+    where
+        E: Into<Box<dyn Error + Send + Sync>>,
+        S: AsRef<str>,
+    {
+        Self {
+            message: message.as_ref().into(),
+            source: Some(source.into()),
+        }
+    }
+}
+
+pub trait Validate
+where
+    Self: Wrapper + Sized,
+{
+    fn validate(inner: <Self as Wrapper>::Inner) -> Result<Self, ValidationError>;
+}
 
 macro_rules! impl_refs_for {
     ($for:ident, $for_str:expr) => {
         impl TryFrom<<$for as Wrapper>::Inner> for $for {
-            type Error = <$for as Wrapper>::Error;
-
-            fn try_from(input: <$for as Wrapper>::Inner) -> Result<Self, Self::Error> {
+            type Error = ValidationError;
+            fn try_from(input: <$for as Wrapper>::Inner) -> Result<Self, ValidationError> {
                 Self::new(input)
             }
         }
@@ -125,9 +169,28 @@ macro_rules! impl_refs_for {
                 (*self).eq(other.inner())
             }
         }
+
+        impl PartialEq<$for> for $for {
+            fn eq(&self, other: &$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
+
+        impl PartialEq<&$for> for $for {
+            fn eq(&self, other: &&$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
+
+        impl PartialEq<$for> for &$for {
+            fn eq(&self, other: &$for) -> bool {
+                self.inner().eq(other.inner())
+            }
+        }
     };
 }
 
+// TODO - note this is problematic because the compiler can't differentiate `&String` from `&str`
 // These assume that the "inner" type implements AsRef<str>, et. al. (i.e. when it is a `String`)
 macro_rules! impl_as_ref_str_for {
     ($for:ident) => {
@@ -145,25 +208,19 @@ macro_rules! impl_as_ref_str_for {
     };
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Int {
     inner: u64,
 }
 
 impl Wrapper for Int {
     type Inner = u64;
-    type Error = Erroneous;
 
-    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, ValidationError>
     where
         Self: Sized,
     {
-        let inner = inner.into();
-        if inner == 5 {
-            Err(Erroneous {})
-        } else {
-            Ok(Self { inner })
-        }
+        <Self as Validate>::validate(inner.into())
     }
 
     fn inner(&self) -> &Self::Inner {
@@ -175,24 +232,37 @@ impl Wrapper for Int {
     }
 }
 
+impl Validate for Int {
+    fn validate(inner: u64) -> Result<Int, ValidationError> {
+        if inner == 5 {
+            Err(ValidationError::new(
+                "Failure validating Int: 5 is a bad number",
+            ))
+        } else {
+            Ok(Self { inner })
+        }
+    }
+}
+
 impl_refs_for!(Int, "Int");
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Str {
     inner: String,
 }
 
 impl Wrapper for Str {
     type Inner = String;
-    type Error = Erroneous;
 
-    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, ValidationError>
     where
         Self: Sized,
     {
         let inner = inner.into();
         if inner.to_lowercase() == "bones" {
-            Err(Erroneous {})
+            Err(ValidationError::new(
+                "Failure validating Int: 5 is a bad number",
+            ))
         } else {
             Ok(Self { inner })
         }
@@ -204,6 +274,16 @@ impl Wrapper for Str {
 
     fn unwrap(self) -> Self::Inner {
         self.inner
+    }
+}
+
+impl Validate for Str {
+    fn validate(inner: <Self as Wrapper>::Inner) -> Result<Self, ValidationError> {
+        if inner.to_lowercase() == "bones" {
+            Err(ValidationError::new("Bones is deceased."))
+        } else {
+            Ok(Self { inner })
+        }
     }
 }
 
@@ -227,24 +307,19 @@ impl Display for Enumious {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct EnumSetting {
     inner: Enumious,
 }
 
 impl Wrapper for EnumSetting {
     type Inner = Enumious;
-    type Error = Erroneous;
 
-    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, Self::Error>
+    fn new<T: Into<Self::Inner>>(inner: T) -> Result<Self, ValidationError>
     where
         Self: Sized,
     {
-        let inner = inner.into();
-        match inner {
-            Enumious::GammaTwilight => Err(Erroneous {}),
-            _ => Ok(Self { inner }),
-        }
+        <Self as Validate>::validate(inner.into())
     }
 
     fn inner(&self) -> &Self::Inner {
@@ -253,6 +328,17 @@ impl Wrapper for EnumSetting {
 
     fn unwrap(self) -> Self::Inner {
         self.inner
+    }
+}
+
+impl Validate for EnumSetting {
+    fn validate(inner: <Self as Wrapper>::Inner) -> Result<Self, ValidationError> {
+        match inner {
+            Enumious::GammaTwilight => {
+                Err(ValidationError::new("Gamma twilight has been discontinued"))
+            }
+            _ => Ok(Self { inner }),
+        }
     }
 }
 

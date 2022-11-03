@@ -1,0 +1,34 @@
+[package]
+name = "wrapper_derive"
+version = "0.1.0"
+edition = "2021"
+description = "A proof of concept to apply the Wrapper trait with a derive macro"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+proc-macro = true
+
+# tom used these
+[dependencies]
+darling = "0.14"
+proc-macro2 = "1"
+quote = "1"
+serde = "1" # bring this into scope because the generated code expects it
+syn = { version = "1", default-features = false, features = ["full", "parsing", "printing", "proc-macro", "visit-mut"] }
+
+[dev-dependencies]
+wrapper = { path = "../wrapper" }
+
+# ethan used these
+#[dependencies]
+#proc-macro2 = "1"
+#quote = "1"
+#serde = "1"
+#syn = "1"
+
+# i used these
+#darling = "0.14"
+#proc-macro2 = "1.0"
+#quote = "1.0"
+#syn = { version = "1.0", default-features = false, features = ["full", "parsing", "printing", "proc-macro", "visit-mut"] }
